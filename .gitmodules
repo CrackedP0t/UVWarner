@@ -1,0 +1,3 @@
+[submodule "lib/VEML6075"]
+	path = lib/VEML6075
+	url = https://github.com/schizobovine/VEML6075.git
