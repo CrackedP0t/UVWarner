@@ -1,4 +1,4 @@
-#include <Arduino.h>
+#pragma once
 
 #define MAX(a, b)                                                       \
 	({ __typeof__ (a) _a = (a); \
@@ -12,13 +12,3 @@
 
 #define CLAMP(l, n, u)                                                  \
 	(MAX(l, MIN(n, u)))
-
-uint8_t tween(uint8_t a, uint8_t b, float p) {
-	if (a == b) {
-		return a;
-	} else if (a < b) {
-		return a + (uint8_t)((b - a) * p);
-	} else {
-		return a - (uint8_t)((a - b) * p);
-	}
-}
