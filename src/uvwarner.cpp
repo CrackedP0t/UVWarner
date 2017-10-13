@@ -108,6 +108,8 @@ void setup() {
 #endif // DISP_SCREEN
 
 #if defined(DISP_NP)
+    FastLED.setCorrection(CRGB(127, 0, 0));
+
 	FastLED.addLeds<NEOPIXEL, NP_PIN>(nps, NP_COUNT);
 #endif // DISP_NP
 
