@@ -1,3 +1,6 @@
 [submodule "lib/VEML6075"]
 	path = lib/VEML6075
 	url = https://github.com/schizobovine/VEML6075.git
+[submodule "lib/Adafruit_SHARP_Memory_Display"]
+	path = lib/Adafruit_SHARP_Memory_Display
+	url = https://github.com/adafruit/Adafruit_SHARP_Memory_Display.git

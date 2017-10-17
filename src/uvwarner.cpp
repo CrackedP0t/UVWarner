@@ -3,15 +3,15 @@
 //#define UVI_CYCLE
 
 #define DISP_SCREEN
-#define DISP_NP
 
 // End config
-
-#define FASTLED_NO_ANNOY
+#include <math.h>
 
 #include <Arduino.h>
 
 #include "util.h"
+
+#define UVI_PLACES 1
 
 #define UVI_STAGE_COUNT 5
 
@@ -26,14 +26,12 @@ const char *stage_advice[UVI_STAGE_COUNT] = {
 };
 
 #if defined(UVI_CYCLE)
-#include <FastLED.h>
-
 #define CYCLE_MIN 0.0
 #define CYCLE_MAX 12.0
-#define CYCLE_DELAY 1
-#define CYCLE_STEP 2
+#define CYCLE_DELAY 25
+#define CYCLE_STEP .05
 
-uint8_t wave_pos = 192;
+double wave_pos = 0.0;
 #else // UVI_CYCLE
 #include <VEML6075.h>
 
@@ -41,55 +39,36 @@ VEML6075 veml6075 = VEML6075();
 bool veml6075_found = false;
 #endif // UVI_CYCLE
 
-#if defined(DISP_NP)
-#include <FastLED.h>
-
-#define NP_PIN 12
-#define NP_COUNT 8
-
-#define NP_DIM_PIN 0
-
-const CRGB np_colors[UVI_STAGE_COUNT] = {
-	CRGB::Green,
-	CRGB::Yellow,
-	CRGB::Orange,
-	CRGB::Red,
-	CRGB::Purple
-};
-
-CRGB nps[NP_COUNT];
-#endif // DISP_NP
-
 #if defined(DISP_SCREEN)
 // Include these because of Arduino idiosyncracies
 #include <SPI.h>
 #include <Wire.h>
 
-#include <U8g2lib.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SharpMem.h>
+#include <OldStandard_Bold28pt7b.h>
 
-#define SCREEN_W 128
-#define SCREEN_H 64
+#define BLACK 0
+#define WHITE 1
 
-#define U8G2_FONT_ASCENT 13
+#define SCREEN_W 144
+#define SCREEN_H 168
 
-#define SCREEN_TYPE U8G2_SSD1306_128X64_NONAME_F_HW_I2C
+#define SCREEN_SCK 5
+#define SCREEN_MOSI 6
+#define SCREEN_SS 9
 
-#define SCREEN_UVI_KERN 4
+#define SCREEN_UVI_KERN 10
+#define SCREEN_UVI_SCALE 1
 
-// tf: 32-255; tr: 32-126; tn: 42-58
-#define SCREEN_UVI_FONT u8g2_font_osb35_tn
-#define SCREEN_ADVICE_FONT u8g2_font_ncenB08_tr
+constexpr auto uvi_font = &OldStandard_Bold28pt7b;
 
-#define SCREEN_RESET_PIN 5
-
-void u8g2PrintCenter(SCREEN_TYPE *disp, u8g2_uint_t x, u8g2_uint_t y, const char *str) {
-	u8g2_uint_t width = disp->getStrWidth(str);
-
-	disp->drawStr(x - width / 2, y, str);
-}
-
-SCREEN_TYPE screen(U8G2_R0, SCREEN_RESET_PIN);
+Adafruit_SharpMem screen(SCREEN_SCK, SCREEN_MOSI, SCREEN_SS,
+                         SCREEN_W, SCREEN_H);
 #endif // DISP_SCREEN
+
+float uv_index = 0.0;
+float last_uvi = -1.0;
 
 void setup() {
 #if !defined(UVI_CYCLE)
@@ -101,28 +80,20 @@ void setup() {
 #endif // !UVI_CYCLE
 
 #if defined(DISP_SCREEN)
-	screen.setI2CAddress(0x7a);
 	screen.begin();
+    screen.clearDisplay();
 
-	screen.clearBuffer();
+    screen.setTextColor(BLACK);
 #endif // DISP_SCREEN
-
-#if defined(DISP_NP)
-    FastLED.setCorrection(CRGB(127, 0, 0));
-
-	FastLED.addLeds<NEOPIXEL, NP_PIN>(nps, NP_COUNT);
-#endif // DISP_NP
 
 #if defined(DEBUG_PRINT)
 	Serial.begin(9600);
 #endif // DEBUG_PRINT
 }
 
-float uv_index = 0.0;
-
 void loop() {
 #if defined(UVI_CYCLE)
-	uv_index = CYCLE_MAX * (float)sin8(wave_pos) / 255.0;
+	uv_index = CYCLE_MAX * ((sin(wave_pos) + 1.0) / 2.0);
 
 	wave_pos += CYCLE_STEP;
 #else // UVI_CYCLE
@@ -138,6 +109,8 @@ void loop() {
 	uv_index = MIN(uv_index, 11.0);
 #endif // UVI_CYCLE
 
+    float disp_index = floor(uv_index * powf(10.0, UVI_PLACES)) / powf(10.0, UVI_PLACES);
+
 	int8_t uvi_stagei = 0;
 
 	for (uvi_stagei = UVI_STAGE_COUNT - 1; uvi_stagei >= 0; uvi_stagei--) {
@@ -148,66 +121,76 @@ void loop() {
 
 
 #if defined(DISP_SCREEN)
-	screen.clearBuffer();
+    if (disp_index != last_uvi) {
+        screen.clearBuffer();
 
-	screen.setFont(SCREEN_UVI_FONT);
-	screen.setFontPosTop();
+        screen.setFont(uvi_font);
 
-	u8g2_uint_t uvi_x = SCREEN_W / 2;
-	u8g2_uint_t uvi_y = 4;
+        uint16_t uvi_x = SCREEN_W / 2;
+        uint16_t uvi_y = SCREEN_H / 2;
 
-	u8g2_uint_t point_width = screen.getStrWidth(".");
+        int16_t d_x, d_y;
+        uint16_t d_w, d_h;
 
-	u8g2PrintCenter(&screen, uvi_x, uvi_y, ".");
+        screen.getTextBounds(".", uvi_x, uvi_y, &d_x, &d_y, &d_w, &d_h);
 
-	char uv_istr[3];
-	snprintf(uv_istr, 3, "%u", (uint8_t)uv_index);
+        screen.drawChar(uvi_x - d_w / 2, uvi_y, '.', BLACK, WHITE,
+                        SCREEN_UVI_SCALE);
 
-	char uv_fstr[2];
-	snprintf(uv_fstr, 2, "%u",
-	         (uint8_t)((uv_index - (uint8_t)uv_index) * 10));
+        char uv_istr[3];
+        int uv_istr_n = snprintf(uv_istr, 3, "%u", (uint8_t)uv_index);
 
-	screen.drawStr(uvi_x - point_width / 2
-	             - screen.getStrWidth(uv_istr) - SCREEN_UVI_KERN,
-	             uvi_y, uv_istr);
-	screen.drawStr(uvi_x + point_width / 2 + SCREEN_UVI_KERN,
-	             uvi_y, uv_fstr);
+        char uv_fstr[2];
+        snprintf(uv_fstr, 2, "%u",
+                 (uint8_t)((uv_index - (uint8_t)uv_index) * 10));
 
-	screen.setFont(SCREEN_ADVICE_FONT);
-	screen.setFontPosBottom();
+        char c;
 
-	u8g2_uint_t advice_x = SCREEN_W / 2;
-	u8g2_uint_t advice_y = SCREEN_H;
+        int16_t c_x, c_y;
+        uint16_t c_w, c_h;
 
-	u8g2PrintCenter(&screen, advice_x, advice_y, stage_advice[uvi_stagei]);
+        char s[2] = {'\0', '\0'};
 
-	screen.sendBuffer();
+        uint16_t total_width = 0;
+
+        for (int i = uv_istr_n - 1; i >= 0; i--) {
+            c = uv_istr[i];
+
+            s[0] = c;
+
+            screen.getTextBounds(s, 0, 0, &c_x, &c_y, &c_w, &c_h);
+
+            total_width += c_w + SCREEN_UVI_KERN;
+
+            screen.drawChar(d_x - d_w / 2 - total_width, uvi_y, c, BLACK, WHITE,
+                            SCREEN_UVI_SCALE);
+        }
+
+        c = uv_fstr[0];
+
+        screen.drawChar(d_x + d_w / 2 + SCREEN_UVI_KERN / 2, uvi_y, c, BLACK, WHITE,
+                        SCREEN_UVI_SCALE);
+
+        // screen.setFont(SCREEN_ADVICE_FONT);
+        // screen.setFontPosBottom();
+
+        // u8g2_uint_t advice_x = SCREEN_W / 2;
+        // u8g2_uint_t advice_y = SCREEN_H;
+
+        // u8g2PrintCenter(&screen, advice_x, advice_y, stage_advice[uvi_stagei]);
+
+        screen.refresh();
+    }
+
 #endif // DISP_SCREEN
-
-#if defined(DISP_NP)
-	CRGB color = np_colors[uvi_stagei];
-
-	uint16_t pot_reading = analogRead(NP_DIM_PIN);
-
-	uint8_t np_dim = 0;
-
-	if (pot_reading > 4) {
-		np_dim = (pot_reading + 1) / 4 - 1;
-	}
-
-	color.nscale8(np_dim);
-
-	fill_solid(nps, NP_COUNT, color);
-
-	FastLED.show();
-#endif // DISP_NP
+    last_uvi = disp_index;
 
 #if defined(UVI_CYCLE)
-	delay(CYCLE_DELAY);
+    delay(CYCLE_DELAY);
 #else // UVI_CYCLE
 } else {
 #if defined(DISP_SCREEN)
-		u8g2PrintCenter(&screen, 0, 0, "Error");
+		screen.print("Error");
 #endif // DISP_SCREEN
 	}
 #endif // UVI_CYCLE
